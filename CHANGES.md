@@ -1,3 +1,11 @@
+2019-07-24, Version 1.22.0c
+==========================
+* fix issue when a soap xml node has xsi type attribute, child node may not have correct type descriptor, 
+  which result incorrect field parsing
+* fix issue when there is an array field with single item, field is parsed as a JS object instead of single item array
+* fix issue when there is an array field, additional level of hierarchy is added to parent object with item type name as array field name.
+
+
 2019-07-19, Version 1.21.0
 ==========================
 

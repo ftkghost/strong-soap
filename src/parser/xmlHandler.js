@@ -547,7 +547,24 @@ class XMLHandler {
     var refs = {}, id; // {id: {hrefs:[], obj:}, ...}
     var stack = [{name: null, object: root, descriptor: descriptor}];
     var options = this.options;
-
+    var isArrayComplexType = function(xmlns, arrayType, elementType) {
+        var schema = self.schemas[xmlns];
+        if(!schema) return undefined;
+        var typeElement = schema.elements[arrayType]
+        if(!typeElement) return undefined;
+        if(typeElement.type.name === 'complexType' 
+            && typeElement.type.children 
+            && typeElement.type.children.length === 1) {
+            var sequence = typeElement.type.children[0];
+            if(sequence.name === 'sequence' 
+                && sequence.children
+                && sequence.children.length == 1) {
+                var itemTypeElement = sequence.children[0];
+                return itemTypeElement.descriptor.qname.name === elementType;
+            }
+        }
+        return false;
+    };
     p.onopentag = function(node) {
       nsContext.pushContext();
       var top = stack[stack.length - 1];
@@ -631,10 +648,26 @@ class XMLHandler {
           refs[id] = {hrefs: [], object: null};
       }
 
+      let currentDescriptor = descriptor && descriptor.findElement(elementQName.name);
+      if(!currentDescriptor) {
+        // Find parent type descriptor with xsiType
+        let xsiType = top.object && top.object[self.options.attributesKey] 
+            && top.object[self.options.attributesKey][self.options.xsiTypeKey];
+        if(xsiType) {
+            let refSchema = self.schemas[xsiType.xmlns];
+            if(refSchema) {
+                let parentType = refSchema.elements[xsiType.type];
+                if(parentType) {
+                    // Find current node type descriptor based on parent type
+                    currentDescriptor = parentType.type.descriptor.findElement(elementQName.name);
+                }
+            }
+        }
+      }
       stack.push({
         name: elementQName.name,
         object: obj,
-        descriptor: descriptor && descriptor.findElement(elementQName.name),
+        descriptor: currentDescriptor,
         id: attrs.id,
       });
     };
@@ -659,7 +692,30 @@ class XMLHandler {
             top.object[elementName] = [val, current.object];
           }
         } else {
-          top.object[elementName] = current.object;
+          let shouldCascadeArray = false;
+          if(current.object && typeof current.object === 'object' 
+            && current.descriptor
+            && Object.keys(current.object).length == 1) {
+              // An object only have one field
+              let onlyFieldName = Object.keys(current.object)[0];
+              // Check if current object is actually an array complex type, 
+              // and the element type is same as field name.
+              if(current.descriptor.type && current.descriptor.type.nsURI && current.descriptor.type.name
+                  && isArrayComplexType(current.descriptor.type.nsURI, current.descriptor.type.name, onlyFieldName)) {
+                shouldCascadeArray = true;
+                // only one item, cascade the array type
+                let val = current.object[onlyFieldName];
+                if(Array.isArray(val)) {
+                    top.object[elementName] = val;
+                }
+                else {
+                    top.object[elementName] = [val];
+                }
+              }
+          }
+          if(!shouldCascadeArray) {
+            top.object[elementName] = current.object;
+          }
         }
       }
       if (current.id != null) {
